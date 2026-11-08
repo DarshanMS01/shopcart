@@ -194,3 +194,5 @@ frontend/dist/
 # Certbot
 certbot/conf/
 certbot/www/
+frontend/.vite/
+.vite/

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   ShoppingCart,
@@ -34,27 +34,33 @@ const ProductDetail = () => {
 
   // Fetch Product Details
   useEffect(() => {
+    let isMounted = true;
+
     const fetchProduct = async () => {
       try {
         setLoading(true);
         const res = await api.get(`/products/${id}/`);
+        if (!isMounted) return;
         setProduct(res.data);
         setError(null);
 
-        // Fetch related products from same category
+        // Fetch related products safely
         if (res.data?.category) {
           try {
             const relRes = await api.get(
               `/products/?category=${encodeURIComponent(res.data.category)}`
             );
-            setRelatedProducts(
-              relRes.data.filter((p) => p.id !== parseInt(id)).slice(0, 4)
-            );
+            if (isMounted && Array.isArray(relRes.data)) {
+              setRelatedProducts(
+                relRes.data.filter((p) => p.id !== parseInt(id)).slice(0, 4)
+              );
+            }
           } catch (e) {
             console.error("Could not fetch related products", e);
           }
         }
       } catch (err) {
+        if (!isMounted) return;
         console.error("Error fetching product details:", err);
         setError(
           err.response?.status === 404
@@ -62,7 +68,7 @@ const ProductDetail = () => {
             : "Failed to load product details."
         );
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -70,10 +76,15 @@ const ProductDetail = () => {
       fetchProduct();
       setSelectedQuantity(1);
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [id]);
 
   // Handle Add to Cart
   const handleAddToCart = async () => {
+    if (!product) return;
     if (!accessToken) {
       navigate(`/login?redirect=/product/${product.id}`);
       return;
@@ -105,6 +116,7 @@ const ProductDetail = () => {
 
   // Handle BUY NOW: Direct Checkout Action
   const handleBuyNow = () => {
+    if (!product) return;
     if (product.stock < selectedQuantity) {
       alert(`Only ${product.stock} items are available in stock.`);
       return;
@@ -119,13 +131,11 @@ const ProductDetail = () => {
     };
 
     if (!accessToken) {
-      // Store pending buy now in sessionStorage so after login, user proceeds directly
       sessionStorage.setItem("pending_buy_now", JSON.stringify(buyNowPayload));
       navigate(`/login?redirect=/checkout`);
       return;
     }
 
-    // Direct checkout with product
     navigate("/checkout", { state: buyNowPayload });
   };
 
@@ -154,7 +164,22 @@ const ProductDetail = () => {
     );
   }
 
-  const specs = product.specifications || {};
+  // Parse specifications safely
+  let specs = {};
+  if (product.specifications) {
+    if (typeof product.specifications === "object" && !Array.isArray(product.specifications)) {
+      specs = product.specifications;
+    } else if (typeof product.specifications === "string") {
+      try {
+        specs = JSON.parse(product.specifications);
+      } catch (e) {
+        specs = {};
+      }
+    }
+  }
+
+  const priceNum = parseFloat(product.price) || 0;
+  const origPriceNum = parseFloat(product.original_price) || 0;
 
   return (
     <div className="py-5 bg-light" style={{ minHeight: "90vh" }}>
@@ -199,7 +224,7 @@ const ProductDetail = () => {
         {/* Main Product Card */}
         <div className="card border-0 shadow-sm rounded-4 overflow-hidden mb-5">
           <div className="row g-0">
-            {/* LEFT SIDE: HD Image Gallery */}
+            {/* LEFT SIDE: HD Image */}
             <div className="col-lg-6 bg-white p-4 p-md-5 d-flex align-items-center justify-content-center border-end">
               <div className="position-relative w-100 text-center">
                 {product.discount_percent > 0 && (
@@ -236,11 +261,11 @@ const ProductDetail = () => {
                 {/* Price Line */}
                 <div className="d-flex align-items-baseline gap-3 my-3">
                   <span className="display-6 fw-bold text-primary">
-                    ${parseFloat(product.price).toFixed(2)}
+                    ${priceNum.toFixed(2)}
                   </span>
-                  {product.original_price && parseFloat(product.original_price) > parseFloat(product.price) && (
+                  {origPriceNum > priceNum && (
                     <span className="text-muted text-decoration-line-through fs-5">
-                      ${parseFloat(product.original_price).toFixed(2)}
+                      ${origPriceNum.toFixed(2)}
                     </span>
                   )}
                   {product.discount_percent > 0 && (
@@ -280,7 +305,7 @@ const ProductDetail = () => {
                       {Object.entries(specs).map(([key, val]) => (
                         <div className="col-sm-6" key={key}>
                           <span className="text-muted">{key}: </span>
-                          <strong className="text-dark">{val}</strong>
+                          <strong className="text-dark">{String(val)}</strong>
                         </div>
                       ))}
                     </div>
@@ -345,7 +370,7 @@ const ProductDetail = () => {
                     </div>
                     <div className="col-4">
                       <ShieldCheck size={20} className="text-success mb-1 d-block mx-auto" />
-                      <span>1-Year Official Warranty</span>
+                      <span>1-Year Warranty</span>
                     </div>
                     <div className="col-4">
                       <RotateCcw size={20} className="text-info mb-1 d-block mx-auto" />
@@ -371,12 +396,16 @@ const ProductDetail = () => {
                       alt={rel.name}
                       className="img-fluid mb-2 mx-auto"
                       style={{ height: "140px", objectFit: "contain" }}
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400";
+                      }}
                     />
                     <h6 className="fw-bold mb-1 text-truncate" title={rel.name}>
                       {rel.name}
                     </h6>
                     <div className="text-primary fw-bold mb-2">
-                      ${parseFloat(rel.price).toFixed(2)}
+                      ${parseFloat(rel.price || 0).toFixed(2)}
                     </div>
                     <Link
                       to={`/product/${rel.id}`}
